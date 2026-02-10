@@ -1,7 +1,101 @@
 ﻿@page "/"
+@using System.Xml.Linq
+@using MudBlazor
+@inject IJSRuntime JS
+@inject HttpClient Http
 
 <PageTitle>Home</PageTitle>
 
-<h1>Hello, world!</h1>
+<MudPaper Class="pa-6">
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Primary"
+               OnClick="FindNearestStops"
+               Disabled="@isLoading">
+        @(isLoading ? "Loading..." : "Find Nearest Stops")
+    </MudButton>
 
-Welcome to your new app.
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-4">
+            @error
+        </MudAlert>
+    }
+
+    @if (stops.Count > 0)
+    {
+        <MudDataGrid Items="@stops">
+            <Columns>
+                <PropertyColumn Property="x => x.StopName" Title="Stop Name" />
+                <PropertyColumn Property="x => x.StopCode" Title="Stop Code" />
+                <PropertyColumn Property="x => x.Miles" Title="Distance (miles)" Format="0.00" />
+            </Columns>
+        </MudDataGrid>
+    }
+
+
+</MudPaper>
+
+@code {
+    private List<StopDistance> stops = new();
+    private bool isLoading;
+    private string? error;
+
+    private async Task FindNearestStops()
+    {
+        error = null;
+        isLoading = true;
+        stops.Clear();
+
+        try
+        {
+            var location = await JS.InvokeAsync<GeoLocation>("getUserLocation");
+
+            var url =
+                $"https://sabbt-cloudflareworker.fionncmurphy.workers.dev/api/GetNearestStops" +
+                $"?latitude={location.Latitude}" +
+                $"&longitude={location.Longitude}" +
+                $"&noOfStops=10" +
+                $"&serviceDate={DateTime.Today:yyyy-MM-dd}";
+
+            var xml = await Http.GetStringAsync(url);
+            var doc = XDocument.Parse(xml);
+
+            stops = doc.Descendants("StopDistances")
+                .Select(x => new StopDistance
+                {
+                    StopName = (string?)x.Element("StopName") ?? "",
+                    StopCode = (string?)x.Element("StopCode") ?? "",
+                    Feet = (double?)x.Element("Feet") ?? 0,
+                    Miles = (double?)x.Element("Miles") ?? 0,
+                    Latitude = (double?)x.Element("Latitude") ?? 0,
+                    Longitude = (double?)x.Element("Longitude") ?? 0
+                })
+                .OrderBy(s => s.Miles)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    public class StopDistance
+    {
+        public string StopName { get; set; } = "";
+        public string StopCode { get; set; } = "";
+        public double Feet { get; set; }
+        public double Miles { get; set; }
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+    }
+
+    public class GeoLocation
+    {
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+    }
+}
